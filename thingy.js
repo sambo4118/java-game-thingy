@@ -83,6 +83,14 @@ class Actor {
 	}
 };
 
+const boxActor = new Actor({
+	xPosition: 320,
+	yPosition: 180,
+	collisionWidth: 60,
+	collisionHeight: 60,
+	backupColor: "#f59e0b",
+	dynamic: true,
+});
 
 const scene = {
 	backgroundColor: "#1e293b",
