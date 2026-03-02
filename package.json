@@ -1,0 +1,14 @@
+{
+  "name": "java-game-thingy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop window app with Electron",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron --no-sandbox --disable-gpu .",
+    "start:local": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}

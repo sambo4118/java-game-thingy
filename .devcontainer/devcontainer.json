@@ -1,0 +1,15 @@
+{
+  "name": "java-game-thingy",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/desktop-lite:1": {}
+  },
+  "forwardPorts": [6080],
+  "portsAttributes": {
+    "6080": {
+      "label": "Desktop (noVNC)",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y libgtk-3-0 libatk1.0-0 libnss3 libxss1 libasound2t64 libx11-xcb1 libgbm1 libxshmfence1 && npm install"
+}

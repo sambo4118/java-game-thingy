@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>java-game-thingy</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        display: grid;
+        place-items: center;
+        height: 100vh;
+      }
+      #game {
+        background: #222;
+        border: 2px solid #aaa;
+      }
+      .card {
+        border: 1px solid #444;
+        padding: 24px;
+        border-radius: 10px;
+        text-align: center;
+        width: min(520px, 90vw);
+      }
+      h1 {
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 8px 0;
+        opacity: 0.9;
+      }
+      .hint {
+        font-size: 0.9rem;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game" width="800" height="500"></canvas>
+    <script src="./thingy.js"></script>
+  </body>
+</html>

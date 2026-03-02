@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime files
+*.pid
+*.pid.lock
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Electron / tooling caches
+.cache/
+.parcel-cache/
+.nyc_output/
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
