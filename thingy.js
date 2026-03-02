@@ -23,8 +23,11 @@ class Actor {
 		this.yPosition = yPosition;
 		this.collisionWidth = collisionWidth;
 		this.collisionHeight = collisionHeight;
+		this.textureSource = textureSource;
 		this.texture = new Image();
-		this.texture.src = textureSource;
+		if (textureSource) {
+			this.texture.src = textureSource;
+		}
 		this.frameWidth = frameWidth;
 		this.frameHeight = frameHeight;
 		this.framecount = framecount;
@@ -35,12 +38,9 @@ class Actor {
 		this.velocityX = velocityX;
 		this.velocityY = velocityY;
 		this.dynamic = dynamic;
-		this.frameTime += deltaTime;
-		const frameDuration = 1 / this.fps;
-		
 	}
 
-	update(deltaTime) {
+	update(deltaTime, colliders = []) {
 		this.frameTime += deltaTime;
 
 		const frameDuration = 1 / this.fps;
@@ -52,10 +52,44 @@ class Actor {
 			}
 		}
 
-		if (this.dynamic) {
-			this.xPosition += this.velocityX * deltaTime;
-			this.yPosition += this.velocityY * deltaTime;
+		if (!this.dynamic) {
+			return;
 		}
+
+		this.velocityY += 9.81 * deltaTime;
+
+		let earliestHit = null;
+
+		for (const otherActor of colliders) {
+			const hit = this.collisionRaycast(otherActor, deltaTime);
+			if (!hit) {
+				continue;
+			}
+
+			if (!earliestHit || hit.hitTimeInThisFrame < earliestHit.hitTimeInThisFrame) {
+				earliestHit = hit;
+			}
+		}
+
+		const moveFraction = earliestHit ? earliestHit.hitTimeInThisFrame : 1;
+		this.xPosition += this.velocityX * deltaTime * moveFraction;
+		this.yPosition += this.velocityY * deltaTime * moveFraction;
+
+		if (!earliestHit) return;
+		
+		const remainingFraction = 1 - earliestHit.hitTimeInThisFrame;
+
+		if (earliestHit.collisionNormalX !== 0) {
+			this.velocityX = 0;
+		}
+
+		if (earliestHit.collisionNormalY !== 0) {
+			this.velocityY = 0;
+		}
+			
+		this.xPosition += this.velocityX * deltaTime * remainingFraction;
+		this.yPosition += this.velocityY * deltaTime * remainingFraction;
+		
 	}
 
 	draw(context) {
@@ -72,7 +106,64 @@ class Actor {
 			context.fillRect(this.xPosition, this.yPosition, this.collisionWidth, this.collisionHeight);
 		}
 	}
+	
+	getExpandedBounds(otherActor) {
+		return {
+		expandedLeftEdge: otherActor.xPosition - this.collisionWidth,
+		expandedTopEdge: otherActor.yPosition - this.collisionHeight,
+		expandedRightEdge: otherActor.xPosition + otherActor.collisionWidth,
+		expandedBottomEdge: otherActor.yPosition + otherActor.collisionHeight
+		};
+	}
 
+
+	collisionRaycast(otherActor, deltaTime) {
+		const deltaX = this.velocityX * deltaTime;
+		const deltaY = this.velocityY * deltaTime;
+
+		if (deltaX === 0 && deltaY === 0) return null;
+
+		const { expandedLeftEdge, expandedTopEdge, expandedRightEdge, expandedBottomEdge } = this.getExpandedBounds(otherActor);
+		
+		const rayOriginX = this.xPosition;
+		const rayOriginY = this.yPosition;
+
+		const inverseMovementX = deltaX !== 0 ? 1 / deltaX: Infinity;
+		const inverseMovementY = deltaY !== 0 ? 1 / deltaY: Infinity;
+
+		let timeEnterX = (expandedLeftEdge - rayOriginX) * inverseMovementX;
+		let timeExitX = (expandedRightEdge - rayOriginX) * inverseMovementX;
+
+		let timeEnterY = (expandedTopEdge - rayOriginY) * inverseMovementY;
+		let timeExitY = (expandedBottomEdge - rayOriginY) * inverseMovementY;
+
+		if (timeEnterX > timeExitX) [timeEnterX, timeExitX] = [timeExitX, timeEnterX];
+  		if (timeEnterY > timeExitY) [timeEnterY, timeExitY] = [timeExitY, timeEnterY];
+
+		const earliestGlobalEnterTime = Math.max(timeEnterX, timeEnterY);
+  		const latestGlobalExitTime = Math.min(timeExitX, timeExitY);
+
+		if (earliestGlobalEnterTime > latestGlobalExitTime) return null;
+		if (latestGlobalExitTime < 0) return null;
+		if (earliestGlobalEnterTime < 0 || earliestGlobalEnterTime > 1) return null;
+
+		let collisionNormalX = 0;
+		let collisionNormalY = 0;
+
+		if (timeEnterX > timeEnterY) {
+			collisionNormalX = deltaX < 0 ? 1 : -1;
+		} else {
+			collisionNormalY = deltaY < 0 ? 1 : -1;
+		}
+
+		return {
+			hitTimeInThisFrame: earliestGlobalEnterTime, // same meaning as tNear
+			collisionNormalX,
+			collisionNormalY,
+		};
+	}
+
+	
 	intersects(otherActor) {
 		return (
 			this.xPosition < otherActor.xPosition + otherActor.collisionWidth &&
@@ -89,28 +180,47 @@ const boxActor = new Actor({
 	collisionWidth: 60,
 	collisionHeight: 60,
 	backupColor: "#f59e0b",
+	velocityX: 50,
+	velocityY: 120,
 	dynamic: true,
 });
 
+const floorActor = new Actor({
+	xPosition: 0,
+	yPosition: canvas.height - 50,
+	collisionWidth: canvas.width,
+	collisionHeight: 50,
+	backupColor: "#334155",
+	dynamic: false,
+});
+
+const colliders = [floorActor];
+
 const scene = {
 	backgroundColor: "#1e293b",
-	box: {
-		x: 320,
-		y: 180,
-		width: 160,
-		height: 120,
-		color: "#f59e0b",
-	},
 };
+
+function update(deltaTime) {
+	boxActor.update(deltaTime, colliders);
+}
 
 function draw() {
 	ctx.fillStyle = scene.backgroundColor;
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-	ctx.fillStyle = scene.box.color;
-	ctx.fillRect(scene.box.x, scene.box.y, scene.box.width, scene.box.height);
-
-	requestAnimationFrame(draw);
+	floorActor.draw(ctx);
+	boxActor.draw(ctx);
 }
 
-draw();
+let lastTime = performance.now();
+
+function gameLoop(currentTime) {
+	const deltaTime = (currentTime - lastTime) / 1000;
+	lastTime = currentTime;
+
+	update(deltaTime);
+	draw();
+
+	requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
