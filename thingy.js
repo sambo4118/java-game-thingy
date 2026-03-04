@@ -1,7 +1,7 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const METER = 10; // 1 meter = 100 pixels
+const METER = 50; // 1 meter = 100 pixels
 const GRAVITY = 9.8 * METER; // 9.8 m/s² (Earth's gravity)
 const MIDSCREENX = canvas.width / 2;
 const MIDSCREENY = canvas.height / 2;
@@ -10,7 +10,9 @@ const DOUBLETAPWINDOW = 1; // seconds
 const DASHSPEED = 10; // in meters per second
 const DASHCOOLDOWN = 0.5; // seconds cooldown when grounded
 const FASTFALLCOOLDOWN = 0.1; // seconds cooldown for fast fall
-const deltaTimeModifier = 2; // for testing purposes, can be used to slow down or speed up time
+const JUMPSPEED = 7; // in meters per second
+const deltaTimeModifier = 1; // for testing purposes, can be used to slow down or speed up time
+
 
 let lastLeftTap = -999;
 let lastRightTap = -999;
@@ -20,6 +22,7 @@ let lastDashTime = -999;
 let lastFastFallTime = -999;
 let airDashCharged = true;
 let wasGrounded = false;
+let doubleJumpCharged = true;
 
 class Actor {
 	static all = [];
@@ -42,7 +45,8 @@ class Actor {
 		dynamic = true,
 		timescale = 1,
 		friction = null,
-		mass = 1,
+		airDrag = 0.01,
+		mass = 10,
 		gravity = GRAVITY
 	}) {
 		this.xPosition = xPosition;
@@ -66,6 +70,7 @@ class Actor {
 		this.dynamic = dynamic;
 		this.timescale = timescale;
 		this.friction = friction;
+		this.airDrag = airDrag;
 		this.mass = mass;
 		this.gravity = gravity;
 		
@@ -77,7 +82,10 @@ class Actor {
 		this.updateAnimation(scaledDeltaTime);
 		if (!this.dynamic) return;
 		
-		this.applyPhysics(scaledDeltaTime);
+		this.applyGravity(scaledDeltaTime);
+		if (!this.isGrounded) {
+			this.applyAirDrag(scaledDeltaTime);
+		}
 		const collision = this.detectCollision(scaledDeltaTime, colliders);
 		this.applyMovement(scaledDeltaTime, collision, colliders);
 		this.applyFriction(scaledDeltaTime); // Apply friction AFTER movement sets groundedActor
@@ -96,8 +104,34 @@ class Actor {
 		}
 	}
 
-	applyPhysics(deltaTime) {
+	applyGravity(deltaTime) {
 		this.velocityY += this.gravity * deltaTime;
+	}
+
+	applyAirDrag(deltaTime) {
+		if (this.airDrag <= 0) return;
+		if (this.mass <= 0) return;
+
+		const speed = Math.hypot(this.velocityX, this.velocityY);
+		if (speed === 0) return;
+
+		// Quadratic drag: F_drag = -k * |v| * v (opposite direction of velocity).
+		const dragFactor = (this.airDrag / this.mass) * speed;
+		const dragAccelerationX = -dragFactor * this.velocityX;
+		const dragAccelerationY = -dragFactor * this.velocityY;
+		const previousVelocityX = this.velocityX;
+		const previousVelocityY = this.velocityY;
+
+		this.velocityX += dragAccelerationX * deltaTime;
+		this.velocityY += dragAccelerationY * deltaTime;
+
+		// Prevent sign flip from very large time steps.
+		if (previousVelocityX !== 0 && Math.sign(this.velocityX) !== Math.sign(previousVelocityX)) {
+			this.velocityX = 0;
+		}
+		if (previousVelocityY !== 0 && Math.sign(this.velocityY) !== Math.sign(previousVelocityY)) {
+			this.velocityY = 0;
+		}
 	}
 
 	applyFriction(deltaTime) {
@@ -296,8 +330,13 @@ class Actor {
 
 const keys = {};
 
+function normalizeKey(key) {
+	return key.length === 1 ? key.toLowerCase() : key;
+}
+
 document.addEventListener("keyup", (event) => {
-	keys[event.key] = false;
+	const key = normalizeKey(event.key);
+	keys[key] = false;
 });
 
 
@@ -305,14 +344,15 @@ document.addEventListener("keyup", (event) => {
 const boxActor = new Actor({
 	xPosition: MIDSCREENX,
 	yPosition: MIDSCREENY,
-	collisionWidth: (METER * 2)/3,
+	collisionWidth: (METER * 2) / 3,
 	collisionHeight: METER,
 	backupColor: "#f59e0b",
 	velocityX: 0,
 	velocityY: 0,
 	dynamic: true,
 	friction: 0.5,
-	mass: 1
+	airDrag: 0.01,
+	mass: 10
 });
 
 const floorActor = new Actor({
@@ -323,14 +363,25 @@ const floorActor = new Actor({
 	backupColor: "#334155",
 	dynamic: false,
 	friction: 0.5,
-	mass: 1
+	mass: 10
 });
-console.log(canvas.width - METER /2);
+
+const platformActor = new Actor({
+	xPosition: MIDSCREENX,
+	yPosition: canvas.height - (METER * 3),
+	collisionWidth: METER * 2,
+	collisionHeight: METER / 2,
+	backupColor: "#334155",
+	dynamic: false,
+	friction: 0.5,
+	mass: 10
+});
+
 const rightWallActor = new Actor({
 	xPosition: canvas.width - METER	/ 2,
-	yPosition: canvas.height - ((METER * 2) + (floorActor.collisionHeight)),
+	yPosition: canvas.height - ((METER * 10) + (floorActor.collisionHeight)),
 	collisionWidth: METER,
-	collisionHeight: METER * 3,
+	collisionHeight: METER * 10,
 	backupColor: "#334155",
 	dynamic: false,
 	friction: 0.5,
@@ -338,13 +389,13 @@ const rightWallActor = new Actor({
 });
 const leftWallActor = new Actor({
 	xPosition: 0,
-	yPosition: canvas.height - ((METER * 2) + (floorActor.collisionHeight)),
+	yPosition: canvas.height - ((METER * 10) + (floorActor.collisionHeight)),
 	collisionWidth: METER / 2,
-	collisionHeight: METER * 3,
+	collisionHeight: METER * 10,
 	backupColor: "#334155",
 	dynamic: false,
 	friction: 0.5,
-	mass: 1
+	mass: 10
 });
 
 const scene = {
@@ -366,6 +417,7 @@ function draw() {
 		ctx.fillText(`Velocity: ${boxActor.velocityX.toFixed(1)}, ${boxActor.velocityY.toFixed(1)}`, 10, 40);
 		ctx.fillText(`Grounded: ${boxActor.isGrounded}`, 10, 60);
 		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 80);
+		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 100);
 	}
 }
 
@@ -373,11 +425,15 @@ let lastTime = performance.now();
 let showDebug = false;
 
 document.addEventListener("keydown", (event) => {
+	const key = normalizeKey(event.key);
+	const isNewPress = !keys[key];
+	keys[key] = true;
+
     const currentTime = performance.now() / 1000;
     
     // Right
-    if (event.key === "d" || event.key === "D" || event.key === "ArrowRight") {
-		if (!keys[event.key] && currentTime - lastRightTap < DOUBLETAPWINDOW) {
+    if ((key === "d" || key === "ArrowRight") && isNewPress) {
+		if (currentTime - lastRightTap < DOUBLETAPWINDOW) {
 			if (boxActor.isGrounded) {
 				// Ground dash - check cooldown
 				if (currentTime - lastDashTime < DASHCOOLDOWN) return;
@@ -391,14 +447,14 @@ document.addEventListener("keydown", (event) => {
 			boxActor.velocityX += METER * DASHSPEED; 
 			lastDashTime = currentTime;
         }
-        if (!keys[event.key]) lastRightTap = currentTime;
+		lastRightTap = currentTime;
 		
 		if (boxActor.velocityX > METER * SOFTMOVEMENTSPEED) return; // prevent reducing speed
 		boxActor.velocityX = METER * SOFTMOVEMENTSPEED;
 	}
     
-    if (event.key === "a" || event.key === "A" || event.key === "ArrowLeft") {
-		if (!keys[event.key] && currentTime - lastLeftTap < DOUBLETAPWINDOW) {
+    if ((key === "a" || key === "ArrowLeft") && isNewPress) {
+		if (currentTime - lastLeftTap < DOUBLETAPWINDOW) {
 			if (boxActor.isGrounded) {
 				// Ground dash - check cooldown
 				if (currentTime - lastDashTime < DASHCOOLDOWN) return;
@@ -413,18 +469,25 @@ document.addEventListener("keydown", (event) => {
 			lastDashTime = currentTime;
 		}
 		
-		if (!keys[event.key]) lastLeftTap = currentTime;
+		lastLeftTap = currentTime;
 		
 		if (boxActor.velocityX < -METER * SOFTMOVEMENTSPEED) return; // prevent reducing speed
 		boxActor.velocityX = -METER * SOFTMOVEMENTSPEED;
 	}
-    
-    keys[event.key] = true;
 
 	
-		if ((keys["w"] || keys["ArrowUp"] || keys[" "])) {
-		if (boxActor.isGrounded) boxActor.velocityY = -METER * 5;
+	if ((key === "w" || key === "ArrowUp" || key === " ") && isNewPress) {
+		
+		if (boxActor.isGrounded || (doubleJumpCharged && !boxActor.isGrounded)) {
+			if (boxActor.velocityY > -METER * JUMPSPEED) boxActor.velocityY = -METER * JUMPSPEED;
+			else boxActor.velocityY += -METER * 5;
+			
+			if (!boxActor.isGrounded) doubleJumpCharged = false;
+		}
+
 	}
+
+	if 
 	
 	if ((keys["s"] || keys["ArrowDown"]) && !boxActor.isGrounded) {
 		const currentTime = performance.now() / 1000;
@@ -434,9 +497,20 @@ document.addEventListener("keydown", (event) => {
 			lastFastFallTime = currentTime;
 		}
 	}
-	if (keys["F5"]) {
+	if (key === "f" && isNewPress) {
         showDebug = !showDebug;
     }
+
+	if (keys["Shift"]) {
+		
+		boxActor.airDrag = 0.5;
+		boxActor.friction = 5;
+	}
+	if (!keys["Shift"]) {
+		
+		boxActor.airDrag = 0.01;
+		boxActor.friction = 0.5;
+	}
 });
 
 function gameLoop(currentTime) {
@@ -446,7 +520,9 @@ function gameLoop(currentTime) {
 
 	if (boxActor.isGrounded) {
 		boxActor.gravity = GRAVITY;
-		
+		if (!wasGrounded) {
+			doubleJumpCharged = true;
+		}
 		// Recharge air dash when landing
 		if (!wasGrounded) {
 			airDashCharged = true;
