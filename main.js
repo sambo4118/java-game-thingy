@@ -15,6 +15,9 @@ function createWindow() {
   });
 
   window.loadFile(path.join(__dirname, "index.html"));
+  
+  // Open DevTools for debugging
+  window.webContents.openDevTools();
 }
 
 app.whenReady().then(() => {
