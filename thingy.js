@@ -1,19 +1,19 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const METER = 50; // 1 meter = 100 pixels
+const METER = 25; // 1 meter = 100 pixels
 const GRAVITY = 9.8 * METER; // 9.8 m/s² (Earth's gravity)
 const MIDSCREENX = canvas.width / 2;
 const MIDSCREENY = canvas.height / 2;
 const SOFTMOVEMENTSPEED = 5; // in meters per second
-const DOUBLETAPWINDOW = 1; // seconds
+const DOUBLETAPWINDOW = 0.3; // seconds
 const DASHSPEED = 10; // in meters per second
 const DASHCOOLDOWN = 0.5; // seconds cooldown when grounded
 const FASTFALLCOOLDOWN = 0.1; // seconds cooldown for fast fall
 const JUMPSPEED = 7; // in meters per second
-const deltaTimeModifier = 1; // for testing purposes, can be used to slow down or speed up time
 
 
+let deltaTimeModifier = 10; // for testing purposes, can be used to slow down or speed up time
 let lastLeftTap = -999;
 let lastRightTap = -999;
 let lastUpTap = -999;
@@ -23,6 +23,7 @@ let lastFastFallTime = -999;
 let airDashCharged = true;
 let wasGrounded = false;
 let doubleJumpCharged = true;
+let hasGroundJumped = false;
 
 class Actor {
 	static all = [];
@@ -173,6 +174,8 @@ class Actor {
 	applyMovement(deltaTime, collision, colliders) {
 		this.isGrounded = false;
 		this.groundedActor = null;
+		this.isTouchingLeftWall = false;
+		this.isTouchingRightWall = false;
 		
 		let velX = this.velocityX;
 		let velY = this.velocityY;
@@ -191,8 +194,18 @@ class Actor {
 			this.xPosition += velX * moveTime;
 			this.yPosition += velY * moveTime;
 
+			// Add small offset to prevent getting stuck on edges
+			const epsilon = 0.01;
+			this.xPosition += collision.collisionNormalX * epsilon;
+			this.yPosition += collision.collisionNormalY * epsilon;
+
 			if (collision.collisionNormalX !== 0) {
 				velX = 0;
+				if (collision.collisionNormalX > 0) {
+					this.isTouchingLeftWall = true;
+				} else {
+					this.isTouchingRightWall = true;
+				}
 			}
 			if (collision.collisionNormalY !== 0) {
 				velY = 0;
@@ -204,6 +217,10 @@ class Actor {
 			
 
 			remainingTime *= (1 - collision.hitTimeInThisFrame);
+			// Ensure we make progress even with zero-time collisions
+			if (collision.hitTimeInThisFrame < 0.0001) {
+				remainingTime = 0;
+			}
 			
 
 			const oldVelX = this.velocityX;
@@ -334,11 +351,19 @@ function normalizeKey(key) {
 	return key.length === 1 ? key.toLowerCase() : key;
 }
 
-document.addEventListener("keyup", (event) => {
-	const key = normalizeKey(event.key);
-	keys[key] = false;
-});
-
+function jumpActor(actor) {
+	if (boxActor.isGrounded) {
+		boxActor.velocityY = -METER * JUMPSPEED
+		return;
+	}
+	if ((doubleJumpCharged && !boxActor.isGrounded)) {
+	
+		if (boxActor.velocityY > 0) boxActor.velocityY = -METER * JUMPSPEED;
+		else boxActor.velocityY += -METER * 5;
+	
+		doubleJumpCharged = false;
+	}
+} 
 
 
 const boxActor = new Actor({
@@ -413,16 +438,27 @@ function draw() {
 	if (showDebug) {
 		ctx.fillStyle = "white";
 		ctx.font = "16px monospace";
-		ctx.fillText(`Position: ${boxActor.xPosition.toFixed(1)}, ${boxActor.yPosition.toFixed(1)}`, 10, 20);
-		ctx.fillText(`Velocity: ${boxActor.velocityX.toFixed(1)}, ${boxActor.velocityY.toFixed(1)}`, 10, 40);
-		ctx.fillText(`Grounded: ${boxActor.isGrounded}`, 10, 60);
-		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 80);
-		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 100);
+		ctx.fillText(`FPS: ${fps}`, 10, 20);
+		ctx.fillText(`Position: ${boxActor.xPosition.toFixed(1)}, ${boxActor.yPosition.toFixed(1)}`, 10, 40);
+		ctx.fillText(`Velocity: ${boxActor.velocityX.toFixed(1)}, ${boxActor.velocityY.toFixed(1)}`, 10, 60);
+		ctx.fillText(`Grounded: ${boxActor.isGrounded}`, 10, 80);
+		ctx.fillText(`LeftWall: ${boxActor.isTouchingLeftWall} | RightWall: ${boxActor.isTouchingRightWall}`, 10, 100);
+		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 120);
+		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 140);
+		ctx.fillText(`GroundTime: ${groundTime}`, 10, 160);
 	}
 }
 
+let isWallSliding = false;
 let lastTime = performance.now();
+let groundTime = 0;
 let showDebug = false;
+let fps = 0;
+
+document.addEventListener("keyup", (event) => {
+	const key = normalizeKey(event.key);
+	keys[key] = false;
+});
 
 document.addEventListener("keydown", (event) => {
 	const key = normalizeKey(event.key);
@@ -476,67 +512,77 @@ document.addEventListener("keydown", (event) => {
 	}
 
 	
-	if ((key === "w" || key === "ArrowUp" || key === " ") && isNewPress) {
-		
-		if (boxActor.isGrounded || (doubleJumpCharged && !boxActor.isGrounded)) {
-			if (boxActor.velocityY > -METER * JUMPSPEED) boxActor.velocityY = -METER * JUMPSPEED;
-			else boxActor.velocityY += -METER * 5;
-			
-			if (!boxActor.isGrounded) doubleJumpCharged = false;
-		}
-
+	// Air jump (double jump) - only on new press while airborne
+	if ((key === "w" || key === "ArrowUp" || key === " ") && isNewPress && !boxActor.isGrounded) {
+		jumpActor(boxActor);
 	}
-
-	if 
 	
-	if ((keys["s"] || keys["ArrowDown"]) && !boxActor.isGrounded) {
+	if ((keys["s"] || keys["ArrowDown"]) && !boxActor.isGrounded && isNewPress) {
+
 		const currentTime = performance.now() / 1000;
+
 		if (currentTime - lastFastFallTime >= FASTFALLCOOLDOWN) {
 			boxActor.gravity = GRAVITY * 2;
 			boxActor.velocityY += METER * 10;
 			lastFastFallTime = currentTime;
 		}
 	}
+	if ((key === "1") && isNewPress) {
+		deltaTimeModifier = 1;
+	}
+
+	if (key === "2" && isNewPress) {
+		deltaTimeModifier = 5;
+	}
+
 	if (key === "f" && isNewPress) {
         showDebug = !showDebug;
     }
+});
 
+function gameLoop() {
+	const currentTime = performance.now();
+	const actualDeltaTime = (currentTime - lastTime) / 1000;
+	const deltaTime = actualDeltaTime / deltaTimeModifier;
+	lastTime = currentTime;
+	const currentTimeInSeconds = currentTime / 1000;
+	
+	// Calculate FPS
+	fps = actualDeltaTime > 0 ? Math.round(1 / actualDeltaTime) : 0;
+
+	// Shift key effect - apply high drag/friction while held
 	if (keys["Shift"]) {
-		
 		boxActor.airDrag = 0.5;
 		boxActor.friction = 5;
-	}
-	if (!keys["Shift"]) {
-		
+	} else {
 		boxActor.airDrag = 0.01;
 		boxActor.friction = 0.5;
 	}
-});
 
-function gameLoop(currentTime) {
-	const deltaTime = ((currentTime - lastTime) / 1000) / deltaTimeModifier;
-	lastTime = currentTime;
-	const currentTimeInSeconds = currentTime / 1000;
+	// Ground jump - check every frame for held jump button
+	if ((keys["w"] || keys["ArrowUp"] || keys[" "]) && boxActor.isGrounded && !hasGroundJumped) {
+		jumpActor(boxActor);
+		hasGroundJumped = true;
+	}
 
 	if (boxActor.isGrounded) {
 		boxActor.gravity = GRAVITY;
+		groundTime += 1;
 		if (!wasGrounded) {
 			doubleJumpCharged = true;
-		}
-		// Recharge air dash when landing
-		if (!wasGrounded) {
 			airDashCharged = true;
+			groundTime = 0;
 		}
+	} else {
+		hasGroundJumped = false;
 	}
 	
 	wasGrounded = boxActor.isGrounded;
 
-	
-
 	boxActor.update(deltaTime, Actor.all);
 	draw();
 
-	requestAnimationFrame(gameLoop);
+	setTimeout(gameLoop, 0);
 }
 
-requestAnimationFrame(gameLoop);
+setTimeout(gameLoop, 0);
