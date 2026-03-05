@@ -1,7 +1,8 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-const METER = 25; // 1 meter = 100 pixels
+window.GAME_CONSTANTS = window.GAME_CONSTANTS || { METER: 25 };
+const METER = window.GAME_CONSTANTS.METER;
 const GRAVITY = 9.8 * METER; // 9.8 m/s² (Earth's gravity)
 const MIDSCREENX = canvas.width / 2;
 const MIDSCREENY = canvas.height / 2;
@@ -11,6 +12,7 @@ const DASHSPEED = 10; // in meters per second
 const DASHCOOLDOWN = 0.5; // seconds cooldown when grounded
 const FASTFALLCOOLDOWN = 0.1; // seconds cooldown for fast fall
 const JUMPSPEED = 7; // in meters per second
+const WALLJUMPGROUNDLOCKOUT = 0.12; // seconds after touching ground where wall jump is ignored
 
 
 let deltaTimeModifier = 10; // for testing purposes, can be used to slow down or speed up time
@@ -20,10 +22,13 @@ let lastUpTap = -999;
 let lastDownTap = -999;
 let lastDashTime = -999;
 let lastFastFallTime = -999;
+let lastGroundedTime = -999;
 let airDashCharged = true;
 let wasGrounded = false;
+let wasHuggingWall = false;
 let doubleJumpCharged = true;
 let hasGroundJumped = false;
+let currentLevelName = "training-ground";
 
 class Actor {
 	static all = [];
@@ -399,6 +404,8 @@ function normalizeKey(key) {
 
 function wallJumpActor(actor) {
 	if (actor.isGrounded) return;
+	const currentTime = performance.now() / 1000;
+	if (currentTime - lastGroundedTime < WALLJUMPGROUNDLOCKOUT) return;
 	if (actor.isTouchingLeftWall) {
 		
 		actor.velocityY = -METER * JUMPSPEED;
@@ -415,7 +422,6 @@ function wallJumpActor(actor) {
 
 
 function jumpActor(actor) {
-	if (actor.isHuggingWall) return;
 	if (actor.isGrounded) {
 		actor.velocityY = -METER * JUMPSPEED
 		return;
@@ -428,17 +434,6 @@ function jumpActor(actor) {
 		doubleJumpCharged = false;
 	}
 } 
-
-function connerJump(actor) {
-	if (!(actor.isGrounded && actor.isHuggingWall)) return;
-	actor.velocityY = (-METER * JUMPSPEED) * 2;
-	if (actor.isTouchingLeftWall) {
-		actor.velocityX = METER * (JUMPSPEED + DASHSPEED);
-	}
-	if (actor.isTouchingRightWall) {
-		actor.velocityX = -METER * (JUMPSPEED + DASHSPEED);
-	}
-}
 
 const boxActor = new Actor({
 	xPosition: MIDSCREENX,
@@ -454,52 +449,70 @@ const boxActor = new Actor({
 	mass: 10
 });
 
-const floorActor = new Actor({
-	xPosition: 0,
-	yPosition: canvas.height - METER / 2,
-	collisionWidth: canvas.width * 2,
-	collisionHeight: METER/2,
-	backupColor: "#334155",
-	dynamic: false,
-	friction: 0.5,
-	mass: 10
-});
-
-const platformActor = new Actor({
-	xPosition: MIDSCREENX,
-	yPosition: canvas.height - (METER * 3),
-	collisionWidth: METER * 2,
-	collisionHeight: METER / 2,
-	backupColor: "#334155",
-	dynamic: false,
-	friction: 0.5,
-	mass: 10
-});
-
-const rightWallActor = new Actor({
-	xPosition: canvas.width - METER	/ 2,
-	yPosition: canvas.height - ((METER * 10) + (floorActor.collisionHeight)),
-	collisionWidth: METER,
-	collisionHeight: METER * 10,
-	backupColor: "#334155",
-	dynamic: false,
-	friction: 0.5,
-	mass: 1
-});
-const leftWallActor = new Actor({
-	xPosition: 0,
-	yPosition: canvas.height - ((METER * 10) + (floorActor.collisionHeight)),
-	collisionWidth: METER / 2,
-	collisionHeight: METER * 10,
-	backupColor: "#334155",
-	dynamic: false,
-	friction: 0.5,
-	mass: 10
-});
-
 const scene = {
 	backgroundColor: "#1e293b",
 };
+
+window.LEVEL_FILES = window.LEVEL_FILES || {};
+
+function resetPlayerState() {
+	boxActor.velocityX = 0;
+	boxActor.velocityY = 0;
+	boxActor.gravity = GRAVITY;
+	boxActor.isGrounded = false;
+	boxActor.isTouchingLeftWall = false;
+	boxActor.isTouchingRightWall = false;
+	boxActor.isHuggingWall = false;
+	boxActor.groundedActor = null;
+
+	airDashCharged = true;
+	doubleJumpCharged = true;
+	hasGroundJumped = false;
+	wasGrounded = false;
+	groundTime = 0;
+}
+
+function createSolidActor(definition) {
+	return new Actor({
+		xPosition: definition.xPosition,
+		yPosition: definition.yPosition,
+		collisionWidth: definition.collisionWidth,
+		collisionHeight: definition.collisionHeight,
+		backupColor: definition.backupColor ?? "#334155",
+		dynamic: false,
+		friction: definition.friction ?? 0.5,
+		mass: definition.mass ?? 10,
+		gravity: 0
+	});
+}
+
+function removeLevelActors() {
+	Actor.all = Actor.all.filter((actor) => actor === boxActor);
+}
+
+function loadLevel(levelName) {
+	const level = window.LEVEL_FILES[levelName];
+	if (!level) {
+		console.warn(`Level '${levelName}' not found.`);
+		return false;
+	}
+
+	removeLevelActors();
+	scene.backgroundColor = level.backgroundColor ?? "#1e293b";
+
+	const spawnX = level.playerSpawn?.x ?? MIDSCREENX;
+	const spawnY = level.playerSpawn?.y ?? MIDSCREENY;
+	boxActor.xPosition = spawnX;
+	boxActor.yPosition = spawnY;
+	resetPlayerState();
+
+	for (const solidDefinition of level.solids ?? []) {
+		createSolidActor(solidDefinition);
+	}
+
+	currentLevelName = levelName;
+	return true;
+}
 
 function draw() {
 	ctx.fillStyle = scene.backgroundColor;
@@ -521,6 +534,7 @@ function draw() {
 		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 140);
 		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 160);
 		ctx.fillText(`GroundTime: ${groundTime}`, 10, 180);
+		ctx.fillText(`Level: ${currentLevelName}`, 10, 200);
 	}
 }
 
@@ -560,8 +574,6 @@ document.addEventListener("keydown", (event) => {
         }
 		lastRightTap = currentTime;
 		
-		if (boxActor.velocityX > METER * SOFTMOVEMENTSPEED) return; // prevent reducing speed
-		boxActor.velocityX = METER * SOFTMOVEMENTSPEED;
 	}
     
     if ((key === "a" || key === "ArrowLeft") && isNewPress) {
@@ -581,9 +593,6 @@ document.addEventListener("keydown", (event) => {
 		}
 		
 		lastLeftTap = currentTime;
-		
-		if (boxActor.velocityX < -METER * SOFTMOVEMENTSPEED) return; // prevent reducing speed
-		boxActor.velocityX = -METER * SOFTMOVEMENTSPEED;
 	}
 
 	
@@ -591,7 +600,6 @@ document.addEventListener("keydown", (event) => {
 	if ((key === "w" || key === "ArrowUp" || key === " ") && isNewPress && !boxActor.isGrounded) {
 		jumpActor(boxActor);
 		wallJumpActor(boxActor);
-		connerJump(boxActor);
 	}
 	
 	if ((keys["s"] || keys["ArrowDown"]) && !boxActor.isGrounded && isNewPress) {
@@ -615,6 +623,18 @@ document.addEventListener("keydown", (event) => {
 	if (key === "f" && isNewPress) {
         showDebug = !showDebug;
     }
+
+	if (key === "3" && isNewPress) {
+		loadLevel("training-ground");
+	}
+
+	if (key === "4" && isNewPress) {
+		loadLevel("stair-climb");
+	}
+
+	if (key === "r" && isNewPress) {
+		loadLevel(currentLevelName);
+	}
 });
 
 function gameLoop() {
@@ -636,11 +656,24 @@ function gameLoop() {
 		boxActor.friction = 0.5;
 	}
 
+	// Continuous left/right movement while key is held.
+	const movingRight = keys["d"] || keys["ArrowRight"];
+	const movingLeft = keys["a"] || keys["ArrowLeft"];
+
+	if (movingRight && !movingLeft) {
+		if (boxActor.velocityX < METER * SOFTMOVEMENTSPEED) {
+			boxActor.velocityX = METER * SOFTMOVEMENTSPEED;
+		}
+	} else if (movingLeft && !movingRight) {
+		if (boxActor.velocityX > -METER * SOFTMOVEMENTSPEED) {
+			boxActor.velocityX = -METER * SOFTMOVEMENTSPEED;
+		}
+	}
+
 	// Ground jump - check every frame for held jump button
 	if ((keys["w"] || keys["ArrowUp"] || keys[" "]) && ((boxActor.isGrounded && !hasGroundJumped) || (boxActor.isTouchingLeftWall || boxActor.isTouchingRightWall))) {
 		jumpActor(boxActor);
 		wallJumpActor(boxActor);
-		connerJump(boxActor);
 		hasGroundJumped = true;
 	}
 
@@ -649,6 +682,7 @@ function gameLoop() {
 		airDashCharged = true;
 	}
 	if (boxActor.isGrounded) {
+		lastGroundedTime = currentTimeInSeconds;
 		boxActor.gravity = GRAVITY;
 		groundTime += 1;
 		if (!wasGrounded) {
@@ -660,6 +694,7 @@ function gameLoop() {
 		hasGroundJumped = false;
 	}
 	
+	wasHuggingWall = boxActor.isHuggingWall;
 	wasGrounded = boxActor.isGrounded;
 
 	boxActor.update(deltaTime, Actor.all);
@@ -668,4 +703,5 @@ function gameLoop() {
 	requestAnimationFrame(gameLoop);
 }
 
+loadLevel(currentLevelName);
 requestAnimationFrame(gameLoop);

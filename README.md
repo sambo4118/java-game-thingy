@@ -30,3 +30,38 @@ Electron will open as a native Linux window inside the remote desktop session.
 
 Note: `npm start` uses `--no-sandbox` for container compatibility. On your own machine, prefer `npm run start:local`.
 It also disables GPU acceleration in Codespaces to avoid EGL-related startup failures.
+
+## Levels As Separate Files
+
+Each level now lives in its own file under `levels/`:
+
+- `levels/training-ground.js`
+- `levels/stair-climb.js`
+
+Each level file registers itself on `window.LEVEL_FILES`:
+
+```js
+window.LEVEL_FILES = window.LEVEL_FILES || {};
+window.LEVEL_FILES["your-level-name"] = {
+	version: 1,
+	backgroundColor: "#1e293b",
+	playerSpawn: { x: 400, y: 250 },
+	solids: [
+		{
+			xPosition: 0,
+			yPosition: 487.5,
+			collisionWidth: 1600,
+			collisionHeight: 12.5,
+			backupColor: "#334155",
+			friction: 0.5,
+			mass: 10
+		}
+	]
+};
+```
+
+In-game test controls:
+
+- `3`: load `training-ground`
+- `4`: load `stair-climb`
+- `r`: reload current level
