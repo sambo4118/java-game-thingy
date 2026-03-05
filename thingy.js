@@ -241,6 +241,52 @@ class Actor {
 
 		this.velocityX = velX;
 		this.velocityY = velY;
+		
+		// Check proximity to all colliders to properly set ground/wall states
+		this.checkProximity(colliders);
+	}
+
+	checkProximity(colliders) {
+		const threshold = 0.5; // pixels - how close counts as "touching"
+		
+		for (const other of colliders) {
+			if (other === this || other.dynamic) continue;
+			
+			// Check if horizontally overlapping (for ground check)
+			const horizontalOverlap = 
+				this.xPosition < other.xPosition + other.collisionWidth &&
+				this.xPosition + this.collisionWidth > other.xPosition;
+			
+			// Check if vertically overlapping (for wall check)
+			const verticalOverlap = 
+				this.yPosition < other.yPosition + other.collisionHeight &&
+				this.yPosition + this.collisionHeight > other.yPosition;
+			
+			if (horizontalOverlap) {
+				// Check ground (bottom of this actor near top of other)
+				const distanceToGround = Math.abs((this.yPosition + this.collisionHeight) - other.yPosition);
+				if (distanceToGround <= threshold && this.velocityY >= 0) {
+					this.isGrounded = true;
+					this.groundedActor = other;
+				}
+			}
+			
+			if (verticalOverlap) {
+				// Check left wall (left side of this actor near right side of other)
+				const distanceToLeftWall = Math.abs(this.xPosition - (other.xPosition + other.collisionWidth));
+				if (distanceToLeftWall <= threshold && this.velocityX <= 0) {
+					this.isTouchingLeftWall = true;
+				}
+				
+				// Check right wall (right side of this actor near left side of other)
+				const distanceToRightWall = Math.abs((this.xPosition + this.collisionWidth) - other.xPosition);
+				if (distanceToRightWall <= threshold && this.velocityX >= 0) {
+					this.isTouchingRightWall = true;
+				}
+			}
+		}
+		
+		this.isHuggingWall = this.isTouchingLeftWall || this.isTouchingRightWall;
 	}
 
 	draw(context) {
@@ -351,20 +397,48 @@ function normalizeKey(key) {
 	return key.length === 1 ? key.toLowerCase() : key;
 }
 
-function jumpActor(actor) {
-	if (boxActor.isGrounded) {
-		boxActor.velocityY = -METER * JUMPSPEED
+function wallJumpActor(actor) {
+	if (actor.isGrounded) return;
+	if (actor.isTouchingLeftWall) {
+		
+		actor.velocityY = -METER * JUMPSPEED;
+		actor.velocityX = METER * JUMPSPEED;
+		return;
+	} 
+	if (actor.isTouchingRightWall) {
+		
+		actor.velocityY = -METER * JUMPSPEED;
+		actor.velocityX = -METER * JUMPSPEED;
 		return;
 	}
-	if ((doubleJumpCharged && !boxActor.isGrounded)) {
+}
+
+
+function jumpActor(actor) {
+	if (actor.isHuggingWall) return;
+	if (actor.isGrounded) {
+		actor.velocityY = -METER * JUMPSPEED
+		return;
+	}
+	if ((doubleJumpCharged && !actor.isGrounded)) {
 	
-		if (boxActor.velocityY > 0) boxActor.velocityY = -METER * JUMPSPEED;
-		else boxActor.velocityY += -METER * 5;
+		if (actor.velocityY > 0) actor.velocityY = -METER * JUMPSPEED;
+		else actor.velocityY += -METER * 5;
 	
 		doubleJumpCharged = false;
 	}
 } 
 
+function connerJump(actor) {
+	if (!(actor.isGrounded && actor.isHuggingWall)) return;
+	actor.velocityY = (-METER * JUMPSPEED) * 2;
+	if (actor.isTouchingLeftWall) {
+		actor.velocityX = METER * (JUMPSPEED + DASHSPEED);
+	}
+	if (actor.isTouchingRightWall) {
+		actor.velocityX = -METER * (JUMPSPEED + DASHSPEED);
+	}
+}
 
 const boxActor = new Actor({
 	xPosition: MIDSCREENX,
@@ -443,9 +517,10 @@ function draw() {
 		ctx.fillText(`Velocity: ${boxActor.velocityX.toFixed(1)}, ${boxActor.velocityY.toFixed(1)}`, 10, 60);
 		ctx.fillText(`Grounded: ${boxActor.isGrounded}`, 10, 80);
 		ctx.fillText(`LeftWall: ${boxActor.isTouchingLeftWall} | RightWall: ${boxActor.isTouchingRightWall}`, 10, 100);
-		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 120);
-		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 140);
-		ctx.fillText(`GroundTime: ${groundTime}`, 10, 160);
+		ctx.fillText(`HuggingWall: ${boxActor.isHuggingWall}`, 10, 120);
+		ctx.fillText(`DashCharge: ${airDashCharged}`, 10, 140);
+		ctx.fillText(`DoubleJumpCharge: ${doubleJumpCharged}`, 10, 160);
+		ctx.fillText(`GroundTime: ${groundTime}`, 10, 180);
 	}
 }
 
@@ -515,6 +590,8 @@ document.addEventListener("keydown", (event) => {
 	// Air jump (double jump) - only on new press while airborne
 	if ((key === "w" || key === "ArrowUp" || key === " ") && isNewPress && !boxActor.isGrounded) {
 		jumpActor(boxActor);
+		wallJumpActor(boxActor);
+		connerJump(boxActor);
 	}
 	
 	if ((keys["s"] || keys["ArrowDown"]) && !boxActor.isGrounded && isNewPress) {
@@ -560,11 +637,17 @@ function gameLoop() {
 	}
 
 	// Ground jump - check every frame for held jump button
-	if ((keys["w"] || keys["ArrowUp"] || keys[" "]) && boxActor.isGrounded && !hasGroundJumped) {
+	if ((keys["w"] || keys["ArrowUp"] || keys[" "]) && ((boxActor.isGrounded && !hasGroundJumped) || (boxActor.isTouchingLeftWall || boxActor.isTouchingRightWall))) {
 		jumpActor(boxActor);
+		wallJumpActor(boxActor);
+		connerJump(boxActor);
 		hasGroundJumped = true;
 	}
 
+	if (boxActor.isHuggingWall) {
+		doubleJumpCharged = true;
+		airDashCharged = true;
+	}
 	if (boxActor.isGrounded) {
 		boxActor.gravity = GRAVITY;
 		groundTime += 1;
@@ -582,7 +665,7 @@ function gameLoop() {
 	boxActor.update(deltaTime, Actor.all);
 	draw();
 
-	setTimeout(gameLoop, 0);
+	requestAnimationFrame(gameLoop);
 }
 
-setTimeout(gameLoop, 0);
+requestAnimationFrame(gameLoop);
